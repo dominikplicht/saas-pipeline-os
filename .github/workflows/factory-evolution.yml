@@ -1,0 +1,89 @@
+name: Factory Evolution
+
+# Evolution Engine v0.1 (first stage): scans the codebase weekly for improvement
+# signals and reports them into a SINGLE deduplicated tracking issue. It never
+# proposes new product features and never writes to the repo — the planner turns
+# signals into tasks. Anti-loop: one issue, updated in place; runs weekly.
+
+on:
+  schedule:
+    - cron: "0 6 * * 1" # Mondays 06:00 UTC
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      REPO: ${{ github.repository }}
+      ISSUE_TITLE: "Factory Evolution Signals"
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - run: npm ci
+
+      - name: Scan for evolution signals
+        shell: bash
+        run: |
+          set -uo pipefail
+          OUT=/tmp/signals.md
+          {
+            echo "<!-- factory-evolution -->"
+            echo "# Factory Evolution Signals"
+            echo
+            echo "_Updated $(date -u +%Y-%m-%dT%H:%MZ) by \`factory-evolution.yml\`. Allowed categories only: stability, quality, performance, cleanup, tests. **No new product features.**_"
+            echo
+
+            echo "## TODO / FIXME / HACK / XXX"
+            if grep -rnE "(TODO|FIXME|HACK|XXX)" src 2>/dev/null > /tmp/todos.txt; then
+              echo '```'; cat /tmp/todos.txt; echo '```'
+            else
+              echo "_None found._"
+            fi
+            echo
+
+            echo "## Type errors (tsc)"
+            if npm run typecheck > /tmp/tsc.txt 2>&1; then
+              echo "_None — typecheck clean._"
+            else
+              echo '```'; tail -n 40 /tmp/tsc.txt; echo '```'
+            fi
+            echo
+
+            echo "## Lint warnings"
+            if npm run lint > /tmp/lint.txt 2>&1; then
+              echo "_None — lint clean._"
+            else
+              echo '```'; tail -n 40 /tmp/lint.txt; echo '```'
+            fi
+            echo
+
+            echo "## Source size (largest files — agent-context hygiene)"
+            echo '```'
+            find src -type f \( -name '*.ts' -o -name '*.tsx' \) -exec wc -l {} + \
+              | sort -rn | head -n 11
+            echo '```'
+          } > "$OUT"
+
+          echo "----- signals -----"; cat "$OUT"
+
+          # Upsert a single tracking issue (dedupe by title).
+          NUM=$(gh issue list --repo "$REPO" --state open --search "$ISSUE_TITLE in:title" \
+                  --json number,title --jq ".[] | select(.title==\"$ISSUE_TITLE\") | .number" | head -n 1)
+          if [[ -n "$NUM" ]]; then
+            echo "Updating issue #$NUM"
+            gh issue edit "$NUM" --repo "$REPO" --body-file "$OUT"
+          else
+            echo "Creating tracking issue"
+            gh issue create --repo "$REPO" --title "$ISSUE_TITLE" \
+              --label "enhancement" --body-file "$OUT"
+          fi

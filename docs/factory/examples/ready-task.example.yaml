@@ -1,0 +1,70 @@
+# Example only. Do not execute.
+# Active ready tasks belong in .factory/tasks/ready/ after product instantiation.
+
+id: example.feature.slice
+title: Implement example feature slice
+type: ui-component
+status: ready
+
+source:
+  github_issue: null
+  parent_task: null
+  created_by: planner-agent
+
+autonomy:
+  level: A3
+  human_gate_required: false
+  escalation_reason: null
+
+risk:
+  level: low
+  areas:
+    - ui
+
+scope:
+  description: Build one small, isolated product feature slice.
+  non_goals:
+    - Do not modify factory policies.
+    - Do not add new dependencies.
+    - Do not change CI workflows.
+  allowed_files:
+    - src/app/**
+    - src/features/example/**
+    - src/components/**
+  blocked_files:
+    - package.json
+    - package-lock.json
+    - .github/**
+    - .factory/policies/**
+    - .factory/validation/**
+    - .env
+    - .env.local
+
+dependencies:
+  tasks: []
+  required_decisions: []
+
+definition_of_done:
+  - Feature route or component exists.
+  - Empty, loading, and basic success states are handled where relevant.
+  - Layout is responsive.
+  - No blocked files are modified.
+  - Required validation checks pass.
+
+validation:
+  required_checks:
+    - typecheck
+    - lint
+    - test
+    - build
+  optional_checks: []
+
+output:
+  expected_pr: true
+  expected_docs_update: false
+  expected_tests_update: true
+
+metadata:
+  example: true
+  created_at: null
+  updated_at: null

@@ -1,0 +1,241 @@
+name: Factory Worker
+
+# Headless execution worker. Given a ready task id, runs Claude Code (headless,
+# authenticated via the Pro/Max OAuth token) to implement the task within its
+# allowed_files, then deterministically generates the run record and opens a PR.
+# The existing Validation + Audit + Auto-Merge pipeline takes over from there.
+#
+# Gated by the kill-switch variable FACTORY_WORKER_ENABLED (must be 'true').
+# Requires the repo secret CLAUDE_CODE_OAUTH_TOKEN (from `claude setup-token`).
+
+on:
+  workflow_dispatch:
+    inputs:
+      task_id:
+        description: "Ready task id, e.g. ui.dashboard.metric-card"
+        required: true
+        type: string
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: factory-worker-${{ inputs.task_id }}
+  cancel-in-progress: false
+
+jobs:
+  work:
+    if: ${{ vars.FACTORY_WORKER_ENABLED == 'true' }}
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      REPO: ${{ github.repository }}
+      TASK_ID: ${{ inputs.task_id }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      - name: Resolve task contract
+        id: task
+        shell: bash
+        run: |
+          set -euo pipefail
+          TASK_FILE=$(grep -rlF --include='*.yaml' "id: $TASK_ID" .factory/tasks 2>/dev/null | head -n 1 || true)
+          if [[ -z "$TASK_FILE" ]]; then
+            echo "::error::No ready task contract found for id '$TASK_ID' under .factory/tasks/"
+            exit 1
+          fi
+          SLUG="${TASK_ID//./-}"
+          BRANCH="factory/task/$SLUG"
+          EXIST=$(gh pr list --repo "$REPO" --head "$BRANCH" --state open --json number --jq '.[0].number' 2>/dev/null || true)
+          if [[ -n "$EXIST" ]]; then
+            echo "::error::An open PR (#$EXIST) already exists for branch $BRANCH"
+            exit 1
+          fi
+          contract() {
+            ruby -ryaml -rdate -e 'f=ARGV[0];k=ARGV[1].split(".");d=(begin;YAML.load_file(f,permitted_classes:[Date,Time],aliases:true);rescue ArgumentError;YAML.load_file(f);end);v=d.dig(*k);if v.is_a?(Array);puts v;else;puts v.to_s;end' "$1" "$2"
+          }
+          {
+            echo "task_file=$TASK_FILE"
+            echo "slug=$SLUG"
+            echo "branch=$BRANCH"
+            echo "autonomy=$(contract "$TASK_FILE" autonomy.level)"
+            echo "risk=$(contract "$TASK_FILE" risk.level)"
+            echo "human_gate=$(contract "$TASK_FILE" autonomy.human_gate_required)"
+            echo "title=$(contract "$TASK_FILE" title)"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Create task branch
+        env:
+          BRANCH: ${{ steps.task.outputs.branch }}
+        run: git checkout -b "$BRANCH"
+
+      - name: Compose worker prompt
+        env:
+          TASK_FILE: ${{ steps.task.outputs.task_file }}
+        run: |
+          {
+            cat .factory/agents/worker-prompt.md
+            echo
+            echo "## Task contract (.factory/tasks)"
+            echo
+            echo '```yaml'
+            cat "$TASK_FILE"
+            echo '```'
+          } > "$RUNNER_TEMP/worker-prompt.md"
+          echo "----- prompt -----"
+          cat "$RUNNER_TEMP/worker-prompt.md"
+
+      - name: Run Claude Code (headless)
+        uses: anthropics/claude-code-base-action@main
+        timeout-minutes: 15
+        with:
+          prompt_file: ${{ runner.temp }}/worker-prompt.md
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          # Pre-approve the tools the worker needs; in non-interactive (-p) mode
+          # un-allowlisted tools are auto-denied, so without this the agent makes
+          # zero edits. Scope is still enforced post-hoc by the audit.
+          claude_args: "--max-turns 20 --allowed-tools Edit,Write,Read,Bash,Glob,Grep,MultiEdit"
+
+      # The Claude Code action may leave a different Node on PATH; re-assert a
+      # Node that has node:util.styleText (>= 20.12), which vitest 4 / the build
+      # require. Without this, Validate fails with a styleText SyntaxError.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Validate
+        shell: bash
+        run: |
+          run_check() { # $1 = name, $2 = npm script
+            if npm run "$2" > "$RUNNER_TEMP/$1.log" 2>&1; then
+              echo "RESULT_${1^^}=pass" >> "$GITHUB_ENV"
+            else
+              echo "RESULT_${1^^}=fail" >> "$GITHUB_ENV"
+              echo "::warning::$1 failed"; tail -n 30 "$RUNNER_TEMP/$1.log"
+            fi
+          }
+          run_check typecheck typecheck
+          run_check lint lint
+          run_check test test
+          run_check build build
+
+      - name: Abort if no changes
+        shell: bash
+        run: |
+          git add -A
+          if git diff --cached --quiet; then
+            echo "::error::Worker produced no changes — nothing to commit. Likely needs escalation or a clearer task."
+            exit 1
+          fi
+
+      - name: Generate run record
+        shell: bash
+        run: |
+          ruby scripts/factory/gen-run-record.rb "$TASK_ID"
+          git add -A
+
+      - name: Commit, push, open PR
+        id: pr
+        shell: bash
+        env:
+          BRANCH: ${{ steps.task.outputs.branch }}
+          TITLE: ${{ steps.task.outputs.title }}
+          AUTONOMY: ${{ steps.task.outputs.autonomy }}
+          RISK: ${{ steps.task.outputs.risk }}
+        run: |
+          set -euo pipefail
+          # Commit as github-actions[bot] — a GitHub-recognized identity so
+          # Vercel attributes the commit and builds the PR preview. A made-up
+          # @users.noreply.github.com address is not linked to any account and
+          # Vercel refuses to deploy such PRs.
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -q \
+            -m "feat($TASK_ID): $TITLE" \
+            -m "Implemented headlessly by factory-worker.yml." \
+            -m "Co-Authored-By: Claude <noreply@anthropic.com>"
+          git push -u origin "$BRANCH"
+          PR_BODY="Headless worker run for \`$TASK_ID\`. Validation: typecheck=$RESULT_TYPECHECK lint=$RESULT_LINT test=$RESULT_TEST build=$RESULT_BUILD. Eligibility is decided in-workflow (PRs opened by GITHUB_TOKEN do not trigger the pull_request pipeline)."
+          gh pr create --repo "$REPO" --base main --head "$BRANCH" \
+            --title "feat($TASK_ID): $TITLE" \
+            --label "autonomy:$AUTONOMY,risk:$RISK" \
+            --body "$PR_BODY"
+          PR=$(gh pr list --repo "$REPO" --head "$BRANCH" --state open --json number --jq '.[0].number')
+          echo "number=$PR" >> "$GITHUB_OUTPUT"
+
+      # Self-contained gate: a PR opened with GITHUB_TOKEN does NOT trigger the
+      # pull_request workflows (GitHub anti-recursion), so factory-validation /
+      # factory-pr-audit / factory-auto-merge never run for it. The worker
+      # therefore enforces scope inline and squash-merges an eligible A3 PR
+      # itself; otherwise it labels for a human. (Kill-switch + the contract's
+      # autonomy level remain the controls.)
+      - name: Enforce scope and self-merge if eligible
+        shell: bash
+        env:
+          PR: ${{ steps.pr.outputs.number }}
+          BRANCH: ${{ steps.task.outputs.branch }}
+          TASK_FILE: ${{ steps.task.outputs.task_file }}
+          AUTONOMY: ${{ steps.task.outputs.autonomy }}
+          RISK: ${{ steps.task.outputs.risk }}
+          HUMAN_GATE: ${{ steps.task.outputs.human_gate }}
+        run: |
+          set -uo pipefail
+          git fetch origin main
+          mapfile -t DIFF < <(git diff --name-only origin/main...HEAD)
+
+          contract() {
+            ruby -ryaml -rdate -e 'f=ARGV[0];k=ARGV[1].split(".");d=(begin;YAML.load_file(f,permitted_classes:[Date,Time],aliases:true);rescue ArgumentError;YAML.load_file(f);end);v=d.dig(*k);if v.is_a?(Array);puts v;else;puts v.to_s;end' "$1" "$2"
+          }
+          mapfile -t ALLOWED < <(contract "$TASK_FILE" scope.allowed_files)
+          mapfile -t BLOCKED < <(contract "$TASK_FILE" scope.blocked_files)
+          HARD_DENY=(".env" ".env.local" "**/*.pem" "**/*.key" "**/id_rsa" "**/secrets/**")
+
+          SCOPE_OK=1
+          for f in "${DIFF[@]}"; do
+            [[ -z "$f" ]] && continue
+            for g in "${HARD_DENY[@]}"; do [[ "$f" == $g ]] && { echo "::error::hard-denied: $f"; SCOPE_OK=0; continue 2; }; done
+            for g in "${BLOCKED[@]}"; do [[ "$f" == $g ]] && { echo "::error::blocked_files: $f"; SCOPE_OK=0; continue 2; }; done
+            if [[ "${#ALLOWED[@]}" -gt 0 ]]; then
+              ok=0; for g in "${ALLOWED[@]}"; do [[ "$f" == $g ]] && { ok=1; break; }; done
+              [[ "$ok" -eq 0 ]] && { echo "::error::not in allowed_files: $f"; SCOPE_OK=0; }
+            fi
+          done
+
+          CHECKS_OK=1
+          for r in "$RESULT_TYPECHECK" "$RESULT_LINT" "$RESULT_TEST" "$RESULT_BUILD"; do
+            [[ "$r" == "pass" ]] || CHECKS_OK=0
+          done
+          echo "autonomy=$AUTONOMY human_gate=$HUMAN_GATE risk=$RISK scope_ok=$SCOPE_OK checks_ok=$CHECKS_OK"
+
+          if [[ "$AUTONOMY" == "A3" && "$HUMAN_GATE" == "false" && "$RISK" != "high" && "$SCOPE_OK" -eq 1 && "$CHECKS_OK" -eq 1 ]]; then
+            gh pr edit "$PR" --repo "$REPO" --add-label "factory:auto-merge" || true
+            gh pr merge "$PR" --repo "$REPO" --squash --delete-branch
+            echo "Self-merged PR #$PR."
+          else
+            if [[ "$CHECKS_OK" -ne 1 ]]; then LABEL="factory:blocked"
+            elif [[ "$SCOPE_OK" -ne 1 && "$AUTONOMY" == "A3" ]]; then LABEL="factory:escalated"
+            else LABEL="factory:human-gate"; fi
+            gh pr edit "$PR" --repo "$REPO" --add-label "$LABEL" || true
+            echo "::warning::PR #$PR not auto-merged (label $LABEL): autonomy=$AUTONOMY human_gate=$HUMAN_GATE risk=$RISK scope_ok=$SCOPE_OK checks_ok=$CHECKS_OK"
+          fi
+
+      # Continue the chain. A worker run started by the dispatcher's GITHUB_TOKEN
+      # does NOT emit a workflow_run event that triggers other workflows
+      # (GitHub anti-recursion), so we cannot rely on the dispatcher's
+      # workflow_run trigger. workflow_dispatch IS the GITHUB_TOKEN exception, so
+      # the worker pings the dispatcher directly to pick the next ready task. The
+      # dispatcher's serial guard prevents overlap; the chain self-terminates
+      # when nothing is ready (and is gated by FACTORY_DISPATCHER_ENABLED).
+      - name: Continue the chain (ping dispatcher)
+        if: ${{ always() && vars.FACTORY_DISPATCHER_ENABLED == 'true' }}
+        run: gh workflow run factory-dispatcher.yml --repo "$REPO" || true

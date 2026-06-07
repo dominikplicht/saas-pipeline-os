@@ -1,0 +1,2 @@
+# Keeps the ready-task directory in the blueprint.
+# Active product tasks are generated here only after product instantiation.

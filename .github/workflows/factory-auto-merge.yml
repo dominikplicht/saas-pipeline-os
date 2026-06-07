@@ -1,0 +1,146 @@
+name: Factory Auto-Merge
+
+# Soft auto-merge engine for a private repo without branch protection.
+# Runs after Factory Validation and Factory PR Audit complete, re-derives
+# auto-merge eligibility from the task contract, and squash-merges via the
+# GitHub API when the change is A3 / low-or-medium risk / not human-gated and
+# both workflows are green. Otherwise it labels the PR for a human.
+#
+# NOTE: workflow_run workflows execute from the DEFAULT branch, so this file
+# only takes effect once merged to main (it cannot auto-merge its own PR).
+
+on:
+  workflow_run:
+    workflows: ["Factory Validation", "Factory PR Audit"]
+    types: [completed]
+
+permissions:
+  contents: write
+  pull-requests: write
+  actions: read
+
+jobs:
+  auto-merge:
+    runs-on: ubuntu-latest
+    # Only for same-repo PR branches (not forks, not direct pushes).
+    if: >-
+      github.event.workflow_run.event == 'pull_request' &&
+      github.event.workflow_run.head_repository.full_name == github.repository
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      REPO: ${{ github.repository }}
+      HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
+      HEAD_BRANCH: ${{ github.event.workflow_run.head_branch }}
+    steps:
+      - name: Checkout PR head (read task contract)
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+          fetch-depth: 0
+
+      - name: Evaluate eligibility and merge
+        shell: bash
+        run: |
+          set -uo pipefail
+          echo "branch=$HEAD_BRANCH sha=$HEAD_SHA"
+
+          # --- 1. Locate the open PR for this branch ---
+          PR=$(gh pr list --repo "$REPO" --head "$HEAD_BRANCH" --state open \
+                 --json number --jq '.[0].number' 2>/dev/null || true)
+          if [[ -z "$PR" || "$PR" == "null" ]]; then
+            echo "No open PR for branch $HEAD_BRANCH — nothing to do."
+            exit 0
+          fi
+          echo "PR #$PR"
+
+          # --- 2. Require BOTH factory workflows green for this exact SHA ---
+          # Keyed by workflow file (robust against job-name changes).
+          conclusion() {
+            gh api "repos/$REPO/actions/workflows/$1/runs?head_sha=$HEAD_SHA&event=pull_request&per_page=1" \
+              --jq '.workflow_runs[0].conclusion // "missing"' 2>/dev/null || echo "missing"
+          }
+          VAL=$(conclusion "factory-validation.yml")
+          AUD=$(conclusion "factory-pr-audit.yml")
+          echo "Factory Validation=$VAL  Factory PR Audit=$AUD"
+
+          if [[ "$VAL" == "missing" || "$AUD" == "missing" || "$VAL" == "null" || "$AUD" == "null" ]]; then
+            echo "Both workflows not yet concluded for this SHA — waiting for the other run."
+            exit 0
+          fi
+
+          # --- 3. Re-derive eligibility from the task contract ---
+          ELIGIBLE=1
+          REASONS=()
+
+          RUN_RECORD=$(grep -rlF --include=run.md "$HEAD_BRANCH" .factory/runs 2>/dev/null | head -n 1 || true)
+          if [[ -z "$RUN_RECORD" ]]; then
+            ELIGIBLE=0; REASONS+=("no run record references the branch")
+          fi
+
+          # Date-safe, Psych-version-portable contract reader (see audit workflow).
+          contract() {
+            ruby -ryaml -rdate -e 'f=ARGV[0];k=ARGV[1].split(".");d=(begin;YAML.load_file(f,permitted_classes:[Date,Time],aliases:true);rescue ArgumentError;YAML.load_file(f);end);v=d.dig(*k);if v.is_a?(Array);puts v;else;puts v.to_s;end' "$1" "$2"
+          }
+          AUTONOMY=""; HUMAN_GATE=""; RISK=""
+          if [[ -n "$RUN_RECORD" ]]; then
+            TASK_ID=$(sed -n 's/^|[[:space:]]*task_id[[:space:]]*|[[:space:]]*\([^|[:space:]]*\)[[:space:]]*|.*/\1/p' "$RUN_RECORD" | head -n 1)
+            TASK_FILE=$(grep -rlF --include='*.yaml' "id: $TASK_ID" .factory/tasks 2>/dev/null | head -n 1 || true)
+            if [[ -n "$TASK_FILE" ]]; then
+              AUTONOMY=$(contract "$TASK_FILE" autonomy.level)
+              HUMAN_GATE=$(contract "$TASK_FILE" autonomy.human_gate_required)
+              RISK=$(contract "$TASK_FILE" risk.level)
+            else
+              ELIGIBLE=0; REASONS+=("task contract not found for id '$TASK_ID'")
+            fi
+          fi
+          echo "autonomy=$AUTONOMY human_gate_required=$HUMAN_GATE risk=$RISK"
+
+          [[ "$VAL" == "success" ]] || { ELIGIBLE=0; REASONS+=("Factory Validation=$VAL"); }
+          [[ "$AUD" == "success" ]] || { ELIGIBLE=0; REASONS+=("Factory PR Audit=$AUD"); }
+          [[ "$AUTONOMY" == "A3" ]] || { ELIGIBLE=0; REASONS+=("autonomy=$AUTONOMY (need A3)"); }
+          [[ "$HUMAN_GATE" == "false" ]] || { ELIGIBLE=0; REASONS+=("human_gate_required=$HUMAN_GATE"); }
+          [[ "$RISK" != "high" ]] || { ELIGIBLE=0; REASONS+=("risk=high"); }
+
+          # --- 4. Act ---
+          if [[ "$ELIGIBLE" -eq 1 ]]; then
+            echo "Eligible — auto-merging PR #$PR"
+            gh pr edit "$PR" --repo "$REPO" --add-label "factory:auto-merge" || true
+            gh pr merge "$PR" --repo "$REPO" --squash --delete-branch
+            exit 0
+          fi
+
+          # --- Triage / escalation routing (failure & human-gate handling) ---
+          REASON_STR=$(IFS='; '; echo "${REASONS[*]}")
+          echo "Not eligible for auto-merge: $REASON_STR"
+
+          if [[ "$VAL" == "failure" ]]; then
+            LABEL="factory:blocked"
+            ROUTING="**Validation failed.** A required check (typecheck/lint/test/build) is red. Treat as a debug task: fix within the task scope and push, or open a follow-up debug task. Up to 2 local fix attempts, then re-scope."
+          elif [[ "$AUD" == "failure" ]]; then
+            if [[ "$AUTONOMY" == "A3" ]]; then
+              # An A3 task should pass the audit; a red audit means a real problem
+              # (out-of-scope / blocked file / run-record mismatch) -> escalate.
+              LABEL="factory:escalated"
+              ROUTING="**Audit failed on an A3 task** — likely a scope violation (out-of-scope or blocked file) or a run-record/diff mismatch. Needs a human decision: re-scope the task or correct the change. Do not widen scope autonomously."
+            else
+              LABEL="factory:human-gate"
+              ROUTING="**Audit red as expected for human-gated infrastructure (autonomy=$AUTONOMY).** Modifying \`.github/**\`, \`package.json\`, policies, etc. trips the blocked-file backstop by design. A human reviews and squash-merges."
+            fi
+          else
+            LABEL="factory:human-gate"
+            ROUTING="Both checks passed but the task is not auto-merge eligible (${REASON_STR:-not A3}). A human reviews and merges."
+          fi
+
+          gh pr edit "$PR" --repo "$REPO" --add-label "$LABEL" || true
+
+          # Post one explanatory triage comment (deduped via a hidden marker).
+          # Built with printf to a file so no multi-line string breaks the YAML
+          # block scalar.
+          MARKER="<!-- factory-triage -->"
+          if gh pr view "$PR" --repo "$REPO" --json comments --jq '.comments[].body' 2>/dev/null | grep -qF "$MARKER"; then
+            echo "Triage comment already present — skipping."
+          else
+            RUN_URL="${{ github.event.workflow_run.html_url }}"
+            printf '%s\n' "$MARKER" "**Factory triage → \`$LABEL\`**" "" "$ROUTING" "" "- Factory Validation: \`$VAL\` · Factory PR Audit: \`$AUD\`" "- autonomy=\`$AUTONOMY\` · human_gate_required=\`$HUMAN_GATE\` · risk=\`$RISK\`" "- Triggering run: $RUN_URL" "" "_Routing follows docs/factory/escalation.md_" > /tmp/factory-triage.md
+            gh pr comment "$PR" --repo "$REPO" --body-file /tmp/factory-triage.md || true
+          fi

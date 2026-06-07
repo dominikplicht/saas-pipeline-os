@@ -1,0 +1,11 @@
+version: 0.1
+
+# Blueprint baseline: no product tasks. The planner populates this per product
+# (after product intent exists). See docs/factory/BLUEPRINT-SCOPE.md.
+source:
+  product: null
+  generated_at: null
+
+tasks: []
+
+edges: []

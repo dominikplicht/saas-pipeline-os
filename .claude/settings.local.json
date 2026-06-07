@@ -1,0 +1,15 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(cd \"/Users/dominik/Documents/Erstellte Konzepte/Development Factory mit Claude-Codex Kombi/Archiv\" && ls)",
+      "Bash(cat /tmp/factory-unzip/prototype-pack/prototype-execution-pack-v0.1/prototype-product-intent.md)",
+      "Bash(cat /tmp/factory-unzip/prototype-pack/prototype-execution-pack-v0.1/prototype-prd.md)",
+      "Read(//private/tmp/factory-unzip/repo-structure/factory-repository-structure-v0.2/.factory/policies/**)",
+      "Bash(npx create-next-app@latest . --typescript --tailwind --eslint --app --src-dir --import-alias \"@/*\" --no-git)",
+      "Bash(npx tsc *)",
+      "Bash(npm run *)",
+      "Bash(git add *)",
+      "Bash(git commit -m ' *)"
+    ]
+  }
+}

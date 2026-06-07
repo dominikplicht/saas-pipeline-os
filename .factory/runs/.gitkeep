@@ -1,0 +1,2 @@
+# Keeps the run-record directory in the blueprint.
+# Product run records are generated here only after task execution.

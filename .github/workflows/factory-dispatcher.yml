@@ -1,0 +1,107 @@
+name: Factory Dispatcher
+
+# Autonomous dispatcher: selects the next dispatchable ready task and starts the
+# headless worker for it — closing the loop so the factory works the queue
+# without a human running `gh workflow run`.
+#
+# Triggers: after each Factory Worker run completes (chain), a daily heartbeat
+# (fallback), and manual dispatch. Serial (max 1): never dispatches while a
+# factory/task PR is open or a worker is running, so a failed/blocked PR pauses
+# the chain until a human resolves it. Gated by FACTORY_DISPATCHER_ENABLED.
+
+on:
+  workflow_run:
+    workflows: ["Factory Worker"]
+    types: [completed]
+  schedule:
+    - cron: "0 6 * * *"
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+  pull-requests: read
+  actions: write
+
+concurrency:
+  group: factory-dispatcher
+  cancel-in-progress: false
+
+jobs:
+  dispatch:
+    if: ${{ vars.FACTORY_DISPATCHER_ENABLED == 'true' }}
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      REPO: ${{ github.repository }}
+      MAX_PARALLEL: "1"
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Serial guard
+        id: guard
+        shell: bash
+        run: |
+          set -euo pipefail
+          OPEN=$(gh pr list --repo "$REPO" --state open --json headRefName \
+            --jq '[.[] | select(.headRefName | startswith("factory/task/"))] | length')
+          RUNNING=$(gh run list --repo "$REPO" --workflow=factory-worker.yml \
+            --json status --jq '[.[] | select(.status=="in_progress" or .status=="queued")] | length')
+          INFLIGHT=$(( OPEN + RUNNING ))
+          echo "open factory/task PRs=$OPEN · running workers=$RUNNING · inflight=$INFLIGHT · max=$MAX_PARALLEL"
+          if (( INFLIGHT >= MAX_PARALLEL )); then
+            echo "Busy — not dispatching."
+            echo "busy=1" >> "$GITHUB_OUTPUT"
+          else
+            echo "busy=0" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Select and dispatch next ready task
+        if: ${{ steps.guard.outputs.busy == '0' }}
+        shell: bash
+        run: |
+          set -uo pipefail
+
+          # Done = task graph status "done" OR a merged PR on factory/task/<slug>.
+          mapfile -t MERGED < <(gh pr list --repo "$REPO" --state merged --base main --limit 200 \
+            --json headRefName --jq '.[].headRefName' | sed -n 's#^factory/task/##p')
+          mapfile -t OPENB < <(gh pr list --repo "$REPO" --state open \
+            --json headRefName --jq '.[].headRefName' | sed -n 's#^factory/task/##p')
+          merged_slugs=" ${MERGED[*]:-} "
+          open_slugs=" ${OPENB[*]:-} "
+
+          declare -A STATUS DEPS
+          IDS=()
+          while IFS=$'\t' read -r id status deps; do
+            [[ -z "$id" ]] && continue
+            IDS+=("$id"); STATUS["$id"]="$status"; DEPS["$id"]="$deps"
+          done < <(ruby scripts/factory/dispatch-candidates.rb)
+
+          is_done() { # $1 = task id
+            local id="$1" slug="${1//./-}"
+            [[ "${STATUS[$id]:-}" == "done" ]] && return 0
+            [[ "$merged_slugs" == *" $slug "* ]] && return 0
+            return 1
+          }
+
+          PICK=""
+          for id in "${IDS[@]}"; do
+            [[ "${STATUS[$id]}" == "ready" ]] || continue
+            is_done "$id" && continue
+            slug="${id//./-}"
+            [[ "$open_slugs" == *" $slug "* ]] && continue
+            grep -rlqF --include='*.yaml' "id: $id" .factory/tasks/ready || continue
+            deps="${DEPS[$id]}"
+            ok=1
+            if [[ -n "$deps" ]]; then
+              IFS=',' read -ra DA <<< "$deps"
+              for d in "${DA[@]}"; do is_done "$d" || { ok=0; break; }; done
+            fi
+            [[ "$ok" -eq 1 ]] && { PICK="$id"; break; }
+          done
+
+          if [[ -z "$PICK" ]]; then
+            echo "No dispatchable ready task — idle."
+            exit 0
+          fi
+          echo "Dispatching headless worker for task: $PICK"
+          gh workflow run factory-worker.yml --repo "$REPO" -f task_id="$PICK"

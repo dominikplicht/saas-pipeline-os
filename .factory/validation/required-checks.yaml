@@ -1,0 +1,26 @@
+version: 0.1
+
+checks:
+  required:
+    - id: typecheck
+      command: npm run typecheck
+      on_failure: block_merge
+
+    - id: lint
+      command: npm run lint
+      on_failure: block_merge
+
+    - id: test
+      command: npm run test
+      on_failure: block_merge
+
+    - id: build
+      command: npm run build
+      on_failure: block_merge
+
+  optional: []
+
+policy:
+  all_required_must_pass: true
+  optional_failures_allowed: true
+  auto_merge_requires_all_required: true

@@ -1,0 +1,47 @@
+name: Factory Reconcile
+
+# Keeps task-graph statuses honest: marks a task `done` once its branch
+# (factory/task/<slug>) has a merged PR. Runs after each push to main and on
+# demand. Commits with [skip ci] so it never loops or re-triggers CI.
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+  pull-requests: read
+
+concurrency:
+  group: factory-reconcile
+  cancel-in-progress: false
+
+jobs:
+  reconcile:
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      REPO: ${{ github.repository }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Reconcile task-graph statuses from merged PRs
+        shell: bash
+        run: |
+          set -euo pipefail
+          DONE=$(gh pr list --repo "$REPO" --state merged --base main --limit 300 \
+            --json headRefName --jq '.[].headRefName' | sed -n 's#^factory/task/##p')
+          CHANGED=$(printf '%s\n' "$DONE" | ruby scripts/factory/reconcile-status.rb || true)
+          if [[ -z "$CHANGED" ]]; then
+            echo "Task graph already in sync — nothing to reconcile."
+            exit 0
+          fi
+          echo "Reconciled to done:"; echo "$CHANGED"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add .factory/tasks/task-graph.yaml
+          git commit -m "chore(factory): reconcile task-graph statuses [skip ci]"
+          git push origin HEAD:main

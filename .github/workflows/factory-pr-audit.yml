@@ -1,0 +1,217 @@
+name: Factory PR Audit
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: read
+  pull-requests: read
+
+jobs:
+  factory-pr-audit:
+    name: Factory PR Audit
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout PR
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Validate branch naming
+        shell: bash
+        run: |
+          BRANCH="${{ github.head_ref }}"
+          echo "Branch: $BRANCH"
+
+          if [[ "$BRANCH" != factory/task/* ]]; then
+            echo "::error::Branch must start with factory/task/"
+            exit 1
+          fi
+
+      - name: Determine actual PR diff
+        id: diff
+        shell: bash
+        run: |
+          git fetch origin main
+          git diff --name-only origin/main...HEAD | tee /tmp/factory-diff.txt
+
+          echo "Changed files:"
+          cat /tmp/factory-diff.txt
+
+          if [[ ! -s /tmp/factory-diff.txt ]]; then
+            echo "::error::PR has no changed files."
+            exit 1
+          fi
+
+      - name: Resolve run record for this PR
+        id: runrecord
+        shell: bash
+        run: |
+          BRANCH="${{ github.head_ref }}"
+
+          if [[ "$(find .factory/runs -path '*/run.md' -type f | wc -l | tr -d ' ')" -lt 1 ]]; then
+            echo "::error::No run record found under .factory/runs/**/run.md"
+            exit 1
+          fi
+
+          # Select the run record belonging to THIS PR by matching the branch
+          # name recorded inside it, not the alphabetically-last directory.
+          # (Lexical order != chronological order, e.g. task-detail < task-list.)
+          mapfile -t MATCHES < <(grep -rlF --include=run.md "$BRANCH" .factory/runs 2>/dev/null || true)
+
+          if [[ "${#MATCHES[@]}" -eq 0 ]]; then
+            echo "::error::No run record references this PR branch: $BRANCH"
+            echo "::error::Each run record must contain its branch (e.g. a '| branch | $BRANCH |' row)."
+            exit 1
+          fi
+          if [[ "${#MATCHES[@]}" -gt 1 ]]; then
+            echo "::error::Multiple run records reference branch $BRANCH: ${MATCHES[*]}"
+            exit 1
+          fi
+
+          RUN_RECORD="${MATCHES[0]}"
+          echo "Resolved run record: $RUN_RECORD"
+          echo "run_record=$RUN_RECORD" >> "$GITHUB_OUTPUT"
+
+      - name: Validate task file reference exists
+        shell: bash
+        run: |
+          RUN_RECORD="${{ steps.runrecord.outputs.run_record }}"
+
+          # Read the task id from the run record instead of reconstructing it
+          # from the branch slug (slug hyphens are ambiguous vs id dots, e.g.
+          # ui-task-detail-placeholder -> ui.task-detail.placeholder).
+          TASK_ID=$(sed -n 's/^|[[:space:]]*task_id[[:space:]]*|[[:space:]]*\([^|[:space:]]*\)[[:space:]]*|.*/\1/p' "$RUN_RECORD" | head -n 1)
+
+          if [[ -z "$TASK_ID" ]]; then
+            echo "::warning::Could not read task_id from $RUN_RECORD. Manual review may be required."
+            exit 0
+          fi
+
+          echo "Task id from run record: $TASK_ID"
+
+          if grep -rlF --include='*.yaml' "id: $TASK_ID" .factory/tasks >/tmp/factory-task-files.txt 2>/dev/null; then
+            echo "Matching task file(s):"
+            cat /tmp/factory-task-files.txt
+          else
+            echo "::warning::No task file with 'id: $TASK_ID' found. Manual review may be required."
+          fi
+
+      - name: Enforce task scope (allowed_files / blocked_files)
+        shell: bash
+        run: |
+          TASK_FILE="$(head -n 1 /tmp/factory-task-files.txt 2>/dev/null || true)"
+          if [[ -z "$TASK_FILE" || ! -f "$TASK_FILE" ]]; then
+            echo "::warning::No task file resolved; skipping per-task scope enforcement."
+            exit 0
+          fi
+          echo "Task file: $TASK_FILE"
+
+          # Read the task contract with Ruby's YAML. Date-safe and portable
+          # across Psych versions: Psych 4+ (Ruby 3.1+) safe-loads and rejects
+          # Date unless permitted, while Psych 3 (older Ruby) rejects the kwargs
+          # but loads Date by default — so try the kwarg form, fall back on
+          # ArgumentError. Prints list values one per line, scalars as a string.
+          contract() {
+            ruby -ryaml -rdate -e 'f=ARGV[0];k=ARGV[1].split(".");d=(begin;YAML.load_file(f,permitted_classes:[Date,Time],aliases:true);rescue ArgumentError;YAML.load_file(f);end);v=d.dig(*k);if v.is_a?(Array);puts v;else;puts v.to_s;end' "$1" "$2"
+          }
+          mapfile -t ALLOWED < <(contract "$TASK_FILE" scope.allowed_files)
+          mapfile -t BLOCKED < <(contract "$TASK_FILE" scope.blocked_files)
+          AUTONOMY=$(contract "$TASK_FILE" autonomy.level)
+          HUMAN_GATE=$(contract "$TASK_FILE" autonomy.human_gate_required)
+          RISK=$(contract "$TASK_FILE" risk.level)
+          echo "autonomy=$AUTONOMY human_gate_required=$HUMAN_GATE risk=$RISK"
+          echo "allowed_files: ${ALLOWED[*]}"
+          echo "blocked_files: ${BLOCKED[*]}"
+
+          # Hard-deny: never permitted, even if a contract lists them (escalate).
+          HARD_DENY=(".env" ".env.local" "**/*.pem" "**/*.key" "**/id_rsa" "**/secrets/**")
+          # Fallback blocked set: applied ONLY when the task has no allowed_files
+          # (malformed / contract-less PR). Well-formed tasks are governed solely
+          # by their own allowed_files/blocked_files, so an authorized infra task
+          # that lists a workflow in allowed_files passes the audit GREEN — its
+          # human-gating is enforced by the auto-merge engine (autonomy != A3),
+          # not by a red check. This keeps the audit a true scope/drift signal.
+          FALLBACK_BLOCK=("package.json" "package-lock.json" "pnpm-lock.yaml" "yarn.lock" ".github/**" ".factory/policies/**" ".env" ".env.local")
+
+          if [[ "${#ALLOWED[@]}" -eq 0 ]]; then
+            echo "::warning::Task ${TASK_FILE:-<none>} has no allowed_files; applying fallback blocked set."
+          fi
+
+          BAD=0
+          while IFS= read -r f; do
+            [[ -z "$f" ]] && continue
+            denied=0
+
+            # 1. Hard-deny (always, even if listed in a contract)
+            for g in "${HARD_DENY[@]}"; do
+              if [[ "$f" == $g ]]; then
+                echo "::error::Hard-denied file (secrets/.env never allowed — escalate): $f"
+                BAD=1; denied=1; break
+              fi
+            done
+            [[ "$denied" -eq 1 ]] && continue
+
+            # 2. Task blocked_files (contract)
+            for g in "${BLOCKED[@]}"; do
+              if [[ "$f" == $g ]]; then
+                echo "::error::Out-of-scope (matches task blocked_files '$g'): $f"
+                BAD=1; denied=1; break
+              fi
+            done
+            [[ "$denied" -eq 1 ]] && continue
+
+            if [[ "${#ALLOWED[@]}" -gt 0 ]]; then
+              # 3a. Contract allow-list is the source of truth.
+              ok=0
+              for g in "${ALLOWED[@]}"; do
+                if [[ "$f" == $g ]]; then ok=1; break; fi
+              done
+              if [[ "$ok" -eq 0 ]]; then
+                echo "::error::Out-of-scope (not in task allowed_files): $f"
+                BAD=1
+              fi
+            else
+              # 3b. No allow-list -> fallback blocked set protects sensitive paths.
+              for g in "${FALLBACK_BLOCK[@]}"; do
+                if [[ "$f" == $g ]]; then
+                  echo "::error::Blocked file changed (no contract allow-list; fallback): $f"
+                  BAD=1; break
+                fi
+              done
+            fi
+          done < /tmp/factory-diff.txt
+
+          if [[ "$BAD" -ne 0 ]]; then
+            echo "::error::Diff violates the task contract / guardrails. Escalate or re-scope the task."
+            exit 1
+          fi
+          echo "Scope enforcement passed: every changed file is authorized by the task contract."
+
+      - name: Check run record mentions actual diff files
+        shell: bash
+        run: |
+          RUN_RECORD="${{ steps.runrecord.outputs.run_record }}"
+          echo "Using run record: $RUN_RECORD"
+
+          MISSING=0
+
+          while IFS= read -r file; do
+            if ! grep -Fq "$file" "$RUN_RECORD"; then
+              echo "::error::Actual diff file not mentioned in run record: $file"
+              MISSING=1
+            fi
+          done < /tmp/factory-diff.txt
+
+          if [[ "$MISSING" -ne 0 ]]; then
+            exit 1
+          fi
+
+      - name: Factory audit summary
+        shell: bash
+        run: |
+          echo "Factory PR Audit passed."
+          echo "Actual diff:"
+          cat /tmp/factory-diff.txt
