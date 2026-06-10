@@ -1,8 +1,13 @@
 import { SITE } from "@/lib/site";
 import Footer from "@/components/Footer";
+import FakePainCheck from "@/components/pipeline/FakePainCheck";
 import IdeaIntake from "@/components/pipeline/IdeaIntake";
+import InterviewPlan from "@/components/pipeline/InterviewPlan";
+import MvpSlice from "@/components/pipeline/MvpSlice";
+import PainScorecard from "@/components/pipeline/PainScorecard";
 import PipelineOverview from "@/components/pipeline/PipelineOverview";
 import ScopeGuard from "@/components/pipeline/ScopeGuard";
+import SegmentCandidates from "@/components/pipeline/SegmentCandidates";
 
 export default function Home() {
   return (
@@ -40,6 +45,16 @@ export default function Home() {
           <PipelineOverview />
 
           <IdeaIntake />
+
+          <SegmentCandidates />
+
+          <PainScorecard />
+
+          <FakePainCheck />
+
+          <InterviewPlan />
+
+          <MvpSlice />
 
           <ScopeGuard />
         </div>
