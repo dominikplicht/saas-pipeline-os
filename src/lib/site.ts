@@ -1,13 +1,11 @@
 /**
- * Product metadata for the Blueprint.
+ * Product metadata for SaaS Pipeline OS.
  *
- * This is the single place a new product sets its name/description. Replace
- * these values (or run scripts/factory/new-product.sh) when instantiating the
- * blueprint for a real product.
+ * This is the single place the product sets its name/description.
  */
 export const SITE = {
-  name: "Blueprint App",
+  name: "SaaS Pipeline OS",
   description:
-    "A product scaffold built with the Development Factory. Replace this with your product.",
-  tagline: "Built with the Development Factory",
+    "Turn raw SaaS ideas into validated pains, scoped MVPs, and Development Factory-ready handoff packs.",
+  tagline: "From idea to factory handoff",
 } as const;

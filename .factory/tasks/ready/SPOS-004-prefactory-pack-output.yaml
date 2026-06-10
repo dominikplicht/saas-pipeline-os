@@ -1,0 +1,37 @@
+id: SPOS-004
+title: Add Pre-Factory Validation Pack output
+autonomy_level: A2
+status: ready
+
+objective: >
+  Add a Development Factory handoff section that outputs a copyable
+  Pre-Factory Validation Pack in Markdown.
+
+allowed_files:
+  - src/app/**
+  - src/components/**
+  - src/lib/**
+
+blocked_files:
+  - .factory/policies/**
+  - .factory/validation/**
+  - .github/workflows/**
+  - scripts/factory/**
+
+requirements:
+  - Show a Markdown Pre-Factory Validation Pack.
+  - Include Product Intent mapping.
+  - Include MVP promise and first visible goal.
+  - Include non-goals and retention metric.
+  - Include clear next action for Development Factory.
+
+validation:
+  - npm run typecheck
+  - npm run lint
+  - npm run test
+  - npm run build
+
+definition_of_done:
+  - User can copy or manually select the handoff Markdown.
+  - Output can be pasted into `.factory/product/product-intent.md` or used by Codex.
+  - No automated GitHub/Notion writes are added in this task.

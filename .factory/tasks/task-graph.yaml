@@ -1,11 +1,29 @@
+product: saas-pipeline-os
 version: 0.1
-
-# Blueprint baseline: no product tasks. The planner populates this per product
-# (after product intent exists). See docs/factory/BLUEPRINT-SCOPE.md.
-source:
-  product: null
-  generated_at: null
-
-tasks: []
-
-edges: []
+status: draft
+tasks:
+  - id: SPOS-001
+    title: Build SaaS Pipeline OS app shell
+    status: done
+    depends_on: []
+  - id: SPOS-002
+    title: Add idea intake module
+    status: done
+    depends_on:
+      - SPOS-001
+  - id: SPOS-003
+    title: Add static validation output modules
+    status: done
+    depends_on:
+      - SPOS-001
+  - id: SPOS-004
+    title: Add Pre-Factory Validation Pack output
+    status: done
+    depends_on:
+      - SPOS-002
+      - SPOS-003
+  - id: SPOS-005
+    title: Add copy and export interactions
+    status: planned
+    depends_on:
+      - SPOS-004

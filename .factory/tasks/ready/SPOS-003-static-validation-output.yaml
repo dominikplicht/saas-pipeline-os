@@ -1,0 +1,38 @@
+id: SPOS-003
+title: Add static validation output modules
+autonomy_level: A2
+status: ready
+
+objective: >
+  Add static/sample modules that demonstrate the target segment, pain scoring,
+  fake-pain check, interview plan, and MVP slice outputs.
+
+allowed_files:
+  - src/app/**
+  - src/components/**
+  - src/lib/**
+
+blocked_files:
+  - .factory/policies/**
+  - .factory/validation/**
+  - .github/workflows/**
+  - scripts/factory/**
+
+requirements:
+  - Add target segment candidate cards.
+  - Add pain statement scorecard.
+  - Add fake-pain warning module.
+  - Add interview/DM plan module.
+  - Add MVP slice summary.
+  - Use sample data based on SaaS Pipeline OS.
+
+validation:
+  - npm run typecheck
+  - npm run lint
+  - npm run test
+  - npm run build
+
+definition_of_done:
+  - Static output clearly demonstrates the intended workflow.
+  - The most emphasized section is target group and concrete pain.
+  - UI remains MVP-focused and avoids promising full automation.

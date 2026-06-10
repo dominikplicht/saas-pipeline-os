@@ -1,0 +1,37 @@
+id: SPOS-001
+title: Build SaaS Pipeline OS app shell
+autonomy_level: A2
+status: ready
+
+objective: >
+  Create the first visible SaaS Pipeline OS screen with clear positioning,
+  pipeline steps, and MVP scope guard.
+
+allowed_files:
+  - src/app/**
+  - src/components/**
+  - src/lib/site.ts
+  - package.json
+
+blocked_files:
+  - .factory/policies/**
+  - .factory/validation/**
+  - .github/workflows/**
+  - scripts/factory/**
+
+requirements:
+  - Update the app metadata/product name to SaaS Pipeline OS.
+  - Create a polished single-page dashboard.
+  - Show the process from idea to Development Factory handoff.
+  - Include a clear v0 scope guard: no auth, no billing, no backend.
+
+validation:
+  - npm run typecheck
+  - npm run lint
+  - npm run test
+  - npm run build
+
+definition_of_done:
+  - Page renders locally and in Vercel preview.
+  - User understands the product purpose within 10 seconds.
+  - No product-specific changes are made to Factory OS files.
