@@ -1,0 +1,37 @@
+id: SPOS-002
+title: Add idea intake module
+autonomy_level: A2
+status: ready
+
+objective: >
+  Add a raw idea intake section that lets the user paste an idea and capture
+  basic source/context metadata. In v0, it can be static or client-side only.
+
+allowed_files:
+  - src/app/**
+  - src/components/**
+  - src/lib/**
+
+blocked_files:
+  - .factory/policies/**
+  - .factory/validation/**
+  - .github/workflows/**
+  - scripts/factory/**
+
+requirements:
+  - Add a raw idea textarea.
+  - Add optional fields for source and context.
+  - Add a placeholder action button.
+  - Keep state local/client-side if interactivity is implemented.
+  - Do not add backend or persistence.
+
+validation:
+  - npm run typecheck
+  - npm run lint
+  - npm run test
+  - npm run build
+
+definition_of_done:
+  - User can enter a raw SaaS idea.
+  - UI makes clear that the next step is target segment and pain definition.
+  - No backend is introduced.
