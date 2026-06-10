@@ -1,5 +1,6 @@
 import { SITE } from "@/lib/site";
 import Footer from "@/components/Footer";
+import IdeaIntake from "@/components/pipeline/IdeaIntake";
 import PipelineOverview from "@/components/pipeline/PipelineOverview";
 import ScopeGuard from "@/components/pipeline/ScopeGuard";
 
@@ -37,6 +38,8 @@ export default function Home() {
           </header>
 
           <PipelineOverview />
+
+          <IdeaIntake />
 
           <ScopeGuard />
         </div>
