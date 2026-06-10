@@ -1,6 +1,8 @@
 import { SITE } from "@/lib/site";
 import Footer from "@/components/Footer";
+import { buildValidationPackMarkdown } from "@/lib/validation-pack";
 import FakePainCheck from "@/components/pipeline/FakePainCheck";
+import HandoffPack from "@/components/pipeline/HandoffPack";
 import IdeaIntake from "@/components/pipeline/IdeaIntake";
 import InterviewPlan from "@/components/pipeline/InterviewPlan";
 import MvpSlice from "@/components/pipeline/MvpSlice";
@@ -10,6 +12,8 @@ import ScopeGuard from "@/components/pipeline/ScopeGuard";
 import SegmentCandidates from "@/components/pipeline/SegmentCandidates";
 
 export default function Home() {
+  const validationPack = buildValidationPackMarkdown();
+
   return (
     <>
       <main className="min-h-screen bg-slate-950 text-white">
@@ -55,6 +59,8 @@ export default function Home() {
           <InterviewPlan />
 
           <MvpSlice />
+
+          <HandoffPack markdown={validationPack} />
 
           <ScopeGuard />
         </div>
