@@ -4,21 +4,21 @@ status: draft
 tasks:
   - id: SPOS-001
     title: Build SaaS Pipeline OS app shell
-    status: ready
+    status: done
     depends_on: []
   - id: SPOS-002
     title: Add idea intake module
-    status: ready
+    status: done
     depends_on:
       - SPOS-001
   - id: SPOS-003
     title: Add static validation output modules
-    status: ready
+    status: done
     depends_on:
       - SPOS-001
   - id: SPOS-004
     title: Add Pre-Factory Validation Pack output
-    status: ready
+    status: done
     depends_on:
       - SPOS-002
       - SPOS-003
