@@ -1,6 +1,14 @@
-import { FAKE_PAIN_RISKS, REQUIRED_EVIDENCE, WEAK_SIGNALS } from "@/lib/pipeline";
+"use client";
 
-export default function FakePainCheck() {
+import { WEAK_SIGNALS } from "@/lib/pipeline";
+
+export default function FakePainCheck({
+  risks,
+  evidence,
+}: {
+  risks: string[];
+  evidence: string[];
+}) {
   return (
     <section id="fake-pain" className="space-y-5">
       <div>
@@ -20,7 +28,7 @@ export default function FakePainCheck() {
         <article className="rounded-2xl border border-rose-400/20 bg-rose-400/[0.06] p-5">
           <h3 className="font-semibold text-rose-100">⚠ Fake-pain risks</h3>
           <ul className="mt-3 space-y-2 text-sm leading-6 text-rose-100/85">
-            {FAKE_PAIN_RISKS.map((risk) => (
+            {risks.map((risk) => (
               <li key={risk} className="flex gap-2">
                 <span className="text-rose-300">•</span>
                 <span>{risk}</span>
@@ -44,7 +52,7 @@ export default function FakePainCheck() {
         <article className="rounded-2xl border border-emerald-400/20 bg-emerald-400/[0.06] p-5">
           <h3 className="font-semibold text-emerald-100">Required evidence</h3>
           <ol className="mt-3 space-y-2 text-sm leading-6 text-emerald-100/85">
-            {REQUIRED_EVIDENCE.map((item, index) => (
+            {evidence.map((item, index) => (
               <li key={item} className="flex gap-2">
                 <span className="font-semibold text-emerald-300">{index + 1}.</span>
                 <span>{item}</span>

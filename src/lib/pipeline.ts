@@ -233,6 +233,10 @@ export interface PipelineState {
   selectedSegment: number;
   pains: PainStatement[];
   selectedPain: number;
+  dmTemplate: string;
+  interviewQuestions: string[];
+  fakePainRisks: string[];
+  requiredEvidence: string[];
   mvp: MvpSliceState;
 }
 
@@ -257,6 +261,10 @@ export function defaultPipelineState(): PipelineState {
       PAIN_STATEMENTS.findIndex((pain) => pain.recommended),
       0,
     ),
+    dmTemplate: DM_TEMPLATE,
+    interviewQuestions: [...INTERVIEW_QUESTIONS],
+    fakePainRisks: [...FAKE_PAIN_RISKS],
+    requiredEvidence: [...REQUIRED_EVIDENCE],
     mvp: {
       promise: MVP_SLICE.promise,
       firstVisibleGoal: MVP_SLICE.firstVisibleGoal,

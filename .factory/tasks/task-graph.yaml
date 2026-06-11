@@ -32,3 +32,9 @@ tasks:
     status: done
     depends_on:
       - SPOS-004
+  - id: SPOS-007
+    title: Add AI-assisted pipeline generation
+    status: done
+    depends_on:
+      - SPOS-005
+      - SPOS-006
