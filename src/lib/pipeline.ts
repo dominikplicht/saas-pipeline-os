@@ -211,3 +211,58 @@ export const MVP_SLICE = {
     "Fully autonomous product creation without human gates",
   ],
 } as const;
+
+export interface MvpSliceState {
+  promise: string;
+  firstVisibleGoal: string;
+  retentionSignal: string;
+  nonGoals: string[];
+}
+
+/**
+ * Editable state for one pipeline run. Lives client-side only (Phase 2 of
+ * the roadmap): the user adapts the sample data to their own idea and the
+ * validation pack is regenerated from this state.
+ */
+export interface PipelineState {
+  productName: string;
+  idea: string;
+  source: string;
+  context: string;
+  segments: SegmentCandidate[];
+  selectedSegment: number;
+  pains: PainStatement[];
+  selectedPain: number;
+  mvp: MvpSliceState;
+}
+
+/** Fresh, mutable state seeded with the worked example (SaaS Pipeline OS itself). */
+export function defaultPipelineState(): PipelineState {
+  return {
+    productName: "SaaS Pipeline OS",
+    idea: "Structure the fragmented path from raw SaaS idea to validated pain, scoped MVP, and Development Factory execution into one repeatable workflow.",
+    source: "Rapid SaaS Growth Playbook (Notion Ideenbox)",
+    context: "Recurring friction across Notion, ChatGPT, GitHub, Vercel, and Codex",
+    segments: SEGMENT_CANDIDATES.map((segment) => ({ ...segment })),
+    selectedSegment: Math.max(
+      SEGMENT_CANDIDATES.findIndex((segment) => segment.primary),
+      0,
+    ),
+    pains: PAIN_STATEMENTS.map((pain) => ({
+      ...pain,
+      scores: { ...pain.scores },
+      rationale: { ...pain.rationale },
+    })),
+    selectedPain: Math.max(
+      PAIN_STATEMENTS.findIndex((pain) => pain.recommended),
+      0,
+    ),
+    mvp: {
+      promise: MVP_SLICE.promise,
+      firstVisibleGoal: MVP_SLICE.firstVisibleGoal,
+      retentionSignal: MVP_SLICE.retentionSignal,
+      nonGoals: [...MVP_SLICE.nonGoals],
+    },
+  };
+}
+

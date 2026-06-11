@@ -1,19 +1,10 @@
 import { SITE } from "@/lib/site";
 import Footer from "@/components/Footer";
-import { buildValidationPackMarkdown } from "@/lib/validation-pack";
-import FakePainCheck from "@/components/pipeline/FakePainCheck";
-import HandoffPack from "@/components/pipeline/HandoffPack";
-import IdeaIntake from "@/components/pipeline/IdeaIntake";
-import InterviewPlan from "@/components/pipeline/InterviewPlan";
-import MvpSlice from "@/components/pipeline/MvpSlice";
-import PainScorecard from "@/components/pipeline/PainScorecard";
 import PipelineOverview from "@/components/pipeline/PipelineOverview";
+import PipelineWorkspace from "@/components/pipeline/PipelineWorkspace";
 import ScopeGuard from "@/components/pipeline/ScopeGuard";
-import SegmentCandidates from "@/components/pipeline/SegmentCandidates";
 
 export default function Home() {
-  const validationPack = buildValidationPackMarkdown();
-
   return (
     <>
       <main className="min-h-screen bg-slate-950 text-white">
@@ -32,10 +23,10 @@ export default function Home() {
             </p>
             <div className="mt-6 flex flex-wrap gap-3 text-sm">
               <a
-                href="#pipeline"
+                href="#idea-intake"
                 className="rounded-full bg-white px-5 py-2.5 font-medium text-slate-950 transition hover:bg-blue-100"
               >
-                See the pipeline
+                Start with your idea
               </a>
               <a
                 href="#scope-guard"
@@ -48,19 +39,7 @@ export default function Home() {
 
           <PipelineOverview />
 
-          <IdeaIntake />
-
-          <SegmentCandidates />
-
-          <PainScorecard />
-
-          <FakePainCheck />
-
-          <InterviewPlan />
-
-          <MvpSlice />
-
-          <HandoffPack markdown={validationPack} />
+          <PipelineWorkspace />
 
           <ScopeGuard />
         </div>

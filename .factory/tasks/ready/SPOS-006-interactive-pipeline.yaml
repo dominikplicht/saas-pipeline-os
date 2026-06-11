@@ -1,0 +1,38 @@
+id: SPOS-006
+title: Make pipeline editable with local state
+autonomy_level: A2
+status: ready
+
+objective: >
+  Roadmap Phase 2: store the pipeline in local client-side state so the user
+  can adapt the worked example to their own idea. The Pre-Factory Validation
+  Pack regenerates live from the current inputs.
+
+allowed_files:
+  - src/app/**
+  - src/components/**
+  - src/lib/**
+
+blocked_files:
+  - .factory/policies/**
+  - .factory/validation/**
+  - .github/workflows/**
+  - scripts/factory/**
+
+requirements:
+  - Idea intake (working title, idea, source, context) flows into the pack.
+  - User can select the primary target segment.
+  - Pain statements are editable; scores recalculate the weighted score live.
+  - Handoff Markdown is generated client-side from the current state.
+  - State stays local/in-browser; no backend or persistence.
+
+validation:
+  - npm run typecheck
+  - npm run lint
+  - npm run test
+  - npm run build
+
+definition_of_done:
+  - Changing any input visibly changes the generated validation pack.
+  - The decision line follows the framework rule (validate / sharpen / park).
+  - No backend is introduced.

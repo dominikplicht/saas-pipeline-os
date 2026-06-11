@@ -9,7 +9,8 @@
       "Bash(npx tsc *)",
       "Bash(npm run *)",
       "Bash(git add *)",
-      "Bash(git commit -m ' *)"
+      "Bash(git commit -m ' *)",
+      "mcp__22350a91-1911-4fbd-9876-389d9d2ad246__list_deployments"
     ]
   }
 }
