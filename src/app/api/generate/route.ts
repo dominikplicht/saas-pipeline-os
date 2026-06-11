@@ -1,5 +1,5 @@
 import Anthropic from "@anthropic-ai/sdk";
-import { parseGenerationResult } from "@/lib/generation";
+import { parseGenerationResult, type GenerationResult } from "@/lib/generation";
 import { SCORE_WEIGHTS } from "@/lib/pipeline";
 
 const SCORE_PROPERTIES = Object.fromEntries(
@@ -107,14 +107,129 @@ Rules:
 - Generate 5 pain interview questions that probe for concrete recent incidents, current workarounds, and time/money already spent — never hypothetical "would you use" questions.
 - Generate 3-5 fake-pain risks specific to this idea and 4-6 required evidence items (concrete, checkable actions).
 - The MVP slice must be one thin slice: a promise the user can verify in one session, a first visible goal shippable as a single-page prototype, a retention signal, and 4-6 non-goals that block overbuilding (auth, billing, integrations, etc. where applicable).
-- Write everything in English, matching the tone of a pragmatic founder tool.`;
+- Write everything in English, matching the tone of a pragmatic founder tool.
+- Respond with a single JSON object matching the requested schema and nothing else.`;
+
+/** Strip optional Markdown code fences some models wrap around JSON output. */
+function extractJson(text: string): string {
+  const trimmed = text.trim();
+  const fenced = trimmed.match(/^```(?:json)?\s*([\s\S]*?)\s*```$/);
+  return fenced ? fenced[1] : trimmed;
+}
+
+class GenerationHttpError extends Error {
+  constructor(
+    public status: number,
+    message: string,
+  ) {
+    super(message);
+  }
+}
+
+/** OpenRouter — OpenAI-compatible chat completions endpoint. */
+async function generateViaOpenRouter(
+  apiKey: string,
+  userPrompt: string,
+): Promise<GenerationResult> {
+  const model = process.env.OPENROUTER_MODEL || "anthropic/claude-sonnet-4.5";
+
+  const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${apiKey}`,
+      "Content-Type": "application/json",
+      "HTTP-Referer": "https://github.com/dominikplicht/saas-pipeline-os",
+      "X-Title": "SaaS Pipeline OS",
+    },
+    body: JSON.stringify({
+      model,
+      max_tokens: 16000,
+      messages: [
+        { role: "system", content: SYSTEM_PROMPT },
+        { role: "user", content: userPrompt },
+      ],
+      response_format: {
+        type: "json_schema",
+        json_schema: {
+          name: "validation_pipeline",
+          strict: true,
+          schema: GENERATION_SCHEMA,
+        },
+      },
+    }),
+  });
+
+  if (!response.ok) {
+    const detail = await response.text();
+    let message = `OpenRouter error (HTTP ${response.status}).`;
+    try {
+      const parsed = JSON.parse(detail) as { error?: { message?: string } };
+      if (parsed.error?.message) message = `OpenRouter: ${parsed.error.message}`;
+    } catch {
+      // keep generic message
+    }
+    if (response.status === 401) {
+      message = "OpenRouter rejected the API key. Check OPENROUTER_API_KEY.";
+    } else if (response.status === 402) {
+      message = "OpenRouter reports insufficient credits.";
+    } else if (response.status === 404) {
+      message = `OpenRouter does not know the model "${model}". Set OPENROUTER_MODEL to an available model.`;
+    } else if (response.status === 429) {
+      message = "Rate limit reached — wait a moment and try again.";
+    }
+    throw new GenerationHttpError(response.status === 429 ? 429 : 502, message);
+  }
+
+  const data = (await response.json()) as {
+    choices?: { message?: { content?: string }; finish_reason?: string }[];
+  };
+  const content = data.choices?.[0]?.message?.content;
+  if (!content) {
+    throw new GenerationHttpError(502, "OpenRouter returned no usable output. Please try again.");
+  }
+
+  return parseGenerationResult(JSON.parse(extractJson(content)));
+}
+
+/** Direct Anthropic API (fallback when no OpenRouter key is configured). */
+async function generateViaAnthropic(userPrompt: string): Promise<GenerationResult> {
+  const client = new Anthropic();
+
+  const response = await client.messages.create({
+    model: "claude-opus-4-8",
+    max_tokens: 16000,
+    thinking: { type: "adaptive" },
+    system: SYSTEM_PROMPT,
+    messages: [{ role: "user", content: userPrompt }],
+    output_config: {
+      format: { type: "json_schema", schema: GENERATION_SCHEMA },
+    },
+  });
+
+  if (response.stop_reason === "refusal") {
+    throw new GenerationHttpError(
+      502,
+      "The model declined to process this idea. Try rephrasing it.",
+    );
+  }
+
+  const textBlock = response.content.find((block) => block.type === "text");
+  if (!textBlock || textBlock.type !== "text") {
+    throw new GenerationHttpError(502, "The model returned no usable output. Please try again.");
+  }
+
+  return parseGenerationResult(JSON.parse(textBlock.text));
+}
 
 export async function POST(request: Request) {
-  if (!process.env.ANTHROPIC_API_KEY) {
+  const openRouterKey = process.env.OPENROUTER_API_KEY;
+  const anthropicKey = process.env.ANTHROPIC_API_KEY;
+
+  if (!openRouterKey && !anthropicKey) {
     return Response.json(
       {
         error:
-          "AI generation is not configured. Set the ANTHROPIC_API_KEY environment variable (locally in .env.local, on Vercel in the project settings).",
+          "AI generation is not configured. Set OPENROUTER_API_KEY (or ANTHROPIC_API_KEY) — locally in .env.local, on Vercel in the project settings.",
       },
       { status: 503 },
     );
@@ -141,38 +256,15 @@ export async function POST(request: Request) {
     .filter(Boolean)
     .join("\n");
 
-  const client = new Anthropic();
-
   try {
-    const response = await client.messages.create({
-      model: "claude-opus-4-8",
-      max_tokens: 16000,
-      thinking: { type: "adaptive" },
-      system: SYSTEM_PROMPT,
-      messages: [{ role: "user", content: userPrompt }],
-      output_config: {
-        format: { type: "json_schema", schema: GENERATION_SCHEMA },
-      },
-    });
-
-    if (response.stop_reason === "refusal") {
-      return Response.json(
-        { error: "The model declined to process this idea. Try rephrasing it." },
-        { status: 502 },
-      );
-    }
-
-    const textBlock = response.content.find((block) => block.type === "text");
-    if (!textBlock || textBlock.type !== "text") {
-      return Response.json(
-        { error: "The model returned no usable output. Please try again." },
-        { status: 502 },
-      );
-    }
-
-    const result = parseGenerationResult(JSON.parse(textBlock.text));
+    const result = openRouterKey
+      ? await generateViaOpenRouter(openRouterKey, userPrompt)
+      : await generateViaAnthropic(userPrompt);
     return Response.json(result);
   } catch (error) {
+    if (error instanceof GenerationHttpError) {
+      return Response.json({ error: error.message }, { status: error.status });
+    }
     if (error instanceof Anthropic.RateLimitError) {
       return Response.json(
         { error: "Rate limit reached — wait a moment and try again." },
