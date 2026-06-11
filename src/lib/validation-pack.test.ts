@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { buildValidationPackMarkdown } from "./validation-pack";
-import { scoreDecision, weightedPainScore } from "./pipeline";
+import { defaultPipelineState, scoreDecision, weightedPainScore } from "./pipeline";
 
 describe("weightedPainScore", () => {
   it("applies the framework weights", () => {
@@ -70,5 +70,39 @@ describe("buildValidationPackMarkdown", () => {
   it("maps to Development Factory artifacts", () => {
     expect(markdown).toContain("product-intent.md");
     expect(markdown).toContain("task-graph.yaml");
+  });
+
+  it("reflects user input from the pipeline state", () => {
+    const state = defaultPipelineState();
+    state.productName = "Invoice Radar";
+    state.idea = "Track unpaid invoices across clients automatically.";
+    state.source = "Customer call";
+    state.context = "Freelancer admin friction";
+    state.selectedSegment = 1;
+    state.mvp.promise = "See every overdue invoice in one place.";
+
+    const custom = buildValidationPackMarkdown(state);
+    expect(custom).toContain("Invoice Radar");
+    expect(custom).toContain("Track unpaid invoices across clients automatically.");
+    expect(custom).toContain("Source: Customer call");
+    expect(custom).toContain("Context: Freelancer admin friction");
+    expect(custom).toContain(`**${state.segments[1].name}**`);
+    expect(custom).toContain("See every overdue invoice in one place.");
+  });
+
+  it("recalculates score and decision from edited scores", () => {
+    const state = defaultPipelineState();
+    state.pains[state.selectedPain].scores = {
+      frequency: 2,
+      intensity: 2,
+      willingnessToPay: 2,
+      reachability: 2,
+      mvpFeasibility: 2,
+      differentiation: 2,
+    };
+
+    const custom = buildValidationPackMarkdown(state);
+    expect(custom).toContain("2.0 / 5");
+    expect(custom).toContain("Park — evidence does not justify building now");
   });
 });

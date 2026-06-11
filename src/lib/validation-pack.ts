@@ -3,28 +3,41 @@ import {
   EVIDENCE_RECORD_TEMPLATE,
   FAKE_PAIN_RISKS,
   INTERVIEW_QUESTIONS,
-  MVP_SLICE,
-  PAIN_STATEMENTS,
   REQUIRED_EVIDENCE,
   SCORE_LABELS,
   SCORE_WEIGHTS,
-  SEGMENT_CANDIDATES,
+  defaultPipelineState,
   scoreDecision,
   weightedPainScore,
+  type PipelineState,
   type ScoreDimension,
 } from "./pipeline";
 
+function decisionLine(score: number): string {
+  const decision = scoreDecision(score);
+  if (decision === "Validate with users") {
+    return `Continue — validate with users (score ${score.toFixed(1)} ≥ 4.0)`;
+  }
+  if (decision === "Sharpen") {
+    return `Sharpen — the pain is not crisp enough yet (score ${score.toFixed(1)} in 3.0–3.9)`;
+  }
+  return `Park — evidence does not justify building now (score ${score.toFixed(1)} < 3.0)`;
+}
+
 /**
- * Build the Pre-Factory Validation Pack as Markdown, following
- * docs/product/pre-factory-validation-pack-template.md. The output is meant
- * to be pasted into `.factory/product/product-intent.md` or handed to an
- * agent that instantiates a Development Factory product repo.
+ * Build the Pre-Factory Validation Pack as Markdown from the current
+ * pipeline state, following docs/product/pre-factory-validation-pack-template.md.
+ * Without arguments it renders the worked example. The output is meant to be
+ * pasted into `.factory/product/product-intent.md` or handed to an agent that
+ * instantiates a Development Factory product repo.
  */
-export function buildValidationPackMarkdown(): string {
-  const segment = SEGMENT_CANDIDATES.find((candidate) => candidate.primary);
-  const pain = PAIN_STATEMENTS.find((statement) => statement.recommended);
+export function buildValidationPackMarkdown(
+  state: PipelineState = defaultPipelineState(),
+): string {
+  const segment = state.segments[state.selectedSegment] ?? state.segments[0];
+  const pain = state.pains[state.selectedPain] ?? state.pains[0];
   if (!segment || !pain) {
-    throw new Error("Sample data must define a primary segment and a recommended pain");
+    throw new Error("Pipeline state must contain at least one segment and one pain");
   }
 
   const score = weightedPainScore(pain.scores);
@@ -36,15 +49,23 @@ export function buildValidationPackMarkdown(): string {
     )
     .join("\n");
 
+  const sourceLines = [
+    state.idea.trim(),
+    state.source.trim() ? `Source: ${state.source.trim()}` : "",
+    state.context.trim() ? `Context: ${state.context.trim()}` : "",
+  ]
+    .filter(Boolean)
+    .join("\n");
+
   return `# Pre-Factory Validation Pack
 
 ## Product Name
 
-SaaS Pipeline OS
+${state.productName.trim() || "(unnamed product)"}
 
 ## Source Idea
 
-Structure the fragmented path from raw SaaS idea to validated pain, scoped MVP, and Development Factory execution into one repeatable workflow.
+${sourceLines || "(no idea captured yet)"}
 
 ## Target Segment
 
@@ -92,19 +113,19 @@ ${EVIDENCE_RECORD_TEMPLATE}
 
 ## MVP Promise
 
-${MVP_SLICE.promise}
+${state.mvp.promise}
 
 ## First Visible Goal
 
-${MVP_SLICE.firstVisibleGoal}
+${state.mvp.firstVisibleGoal}
 
 ## Non-Goals
 
-${MVP_SLICE.nonGoals.map((item) => `- ${item}`).join("\n")}
+${state.mvp.nonGoals.map((item) => `- ${item}`).join("\n")}
 
 ## Retention Signal
 
-${MVP_SLICE.retentionSignal}
+${state.mvp.retentionSignal}
 
 ## Development Factory Mapping
 
@@ -117,7 +138,7 @@ ${MVP_SLICE.retentionSignal}
 
 ## Decision
 
-Continue — validate with users (score ${score.toFixed(1)} ≥ 4.0)
+${decisionLine(score)}
 
 ## Next Action
 

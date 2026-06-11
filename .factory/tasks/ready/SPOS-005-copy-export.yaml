@@ -1,0 +1,35 @@
+id: SPOS-005
+title: Add copy and export interactions
+autonomy_level: A2
+status: ready
+
+objective: >
+  Let the user take the Pre-Factory Validation Pack out of the tool: copy the
+  Markdown to the clipboard and download it as a .md file named after the
+  product.
+
+allowed_files:
+  - src/app/**
+  - src/components/**
+  - src/lib/**
+
+blocked_files:
+  - .factory/policies/**
+  - .factory/validation/**
+  - .github/workflows/**
+  - scripts/factory/**
+
+requirements:
+  - Copy-to-clipboard action for the generated pack.
+  - Download action producing a Markdown file named after the product slug.
+  - No backend or persistence.
+
+validation:
+  - npm run typecheck
+  - npm run lint
+  - npm run test
+  - npm run build
+
+definition_of_done:
+  - User can copy and download the pack.
+  - File name is derived from the working title.

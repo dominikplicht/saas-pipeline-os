@@ -24,6 +24,11 @@ tasks:
       - SPOS-003
   - id: SPOS-005
     title: Add copy and export interactions
-    status: planned
+    status: done
+    depends_on:
+      - SPOS-004
+  - id: SPOS-006
+    title: Make pipeline editable with local state
+    status: done
     depends_on:
       - SPOS-004
