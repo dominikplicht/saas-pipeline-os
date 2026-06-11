@@ -10,9 +10,15 @@ export interface IdeaIntakeValue {
 export default function IdeaIntake({
   value,
   onChange,
+  onGenerate,
+  generating,
+  error,
 }: {
   value: IdeaIntakeValue;
   onChange: (patch: Partial<IdeaIntakeValue>) => void;
+  onGenerate: () => void;
+  generating: boolean;
+  error: string | null;
 }) {
   return (
     <section id="idea-intake" className="space-y-5">
@@ -83,16 +89,38 @@ export default function IdeaIntake({
         </div>
 
         <div className="flex flex-wrap items-center gap-4">
+          <button
+            type="button"
+            onClick={onGenerate}
+            disabled={generating || value.idea.trim().length === 0}
+            className="rounded-full bg-blue-400 px-5 py-2.5 text-sm font-medium text-slate-950 transition hover:bg-blue-300 disabled:cursor-not-allowed disabled:bg-white/10 disabled:text-slate-500"
+          >
+            {generating ? "Generating pipeline…" : "✦ Generate pipeline with AI"}
+          </button>
           <a
             href="#segments"
-            className="rounded-full bg-blue-400 px-5 py-2.5 text-sm font-medium text-slate-950 transition hover:bg-blue-300"
+            className="rounded-full border border-white/15 px-5 py-2.5 text-sm font-medium text-slate-200 transition hover:border-white/30 hover:bg-white/5"
           >
-            Next: pick the target segment ↓
+            Or adapt manually ↓
           </a>
           <p className="text-xs text-slate-500">
-            Everything stays in your browser — no backend, no persistence.
+            AI drafts the validation content for your idea — you review, edit,
+            and decide. Inputs are stored only in your browser.
           </p>
         </div>
+
+        {generating ? (
+          <p className="rounded-xl border border-blue-400/20 bg-blue-400/10 px-4 py-3 text-sm text-blue-100">
+            Claude is analyzing your idea — segments, pain scoring, interview
+            plan, and MVP slice. This can take a minute.
+          </p>
+        ) : null}
+
+        {error ? (
+          <p className="rounded-xl border border-rose-400/30 bg-rose-400/10 px-4 py-3 text-sm text-rose-100">
+            {error}
+          </p>
+        ) : null}
       </div>
     </section>
   );

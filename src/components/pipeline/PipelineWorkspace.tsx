@@ -6,6 +6,7 @@ import {
   type PipelineState,
   type ScoreDimension,
 } from "@/lib/pipeline";
+import { applyGenerationResult, parseGenerationResult } from "@/lib/generation";
 import { buildValidationPackMarkdown } from "@/lib/validation-pack";
 import FakePainCheck from "./FakePainCheck";
 import HandoffPack from "./HandoffPack";
@@ -16,12 +17,14 @@ import PainScorecard from "./PainScorecard";
 import SegmentCandidates from "./SegmentCandidates";
 
 /**
- * Client-side state for one pipeline run (roadmap Phase 2): the user adapts
- * the worked example to their idea and the validation pack regenerates live.
- * State is intentionally local-only — no backend, no persistence.
+ * Client-side state for one pipeline run. AI generation (roadmap Phase 3)
+ * drafts the validation content from the raw idea; the user reviews, edits,
+ * and decides — every generated field stays editable. State is local-only.
  */
 export default function PipelineWorkspace() {
   const [state, setState] = useState<PipelineState>(defaultPipelineState);
+  const [generating, setGenerating] = useState(false);
+  const [generationError, setGenerationError] = useState<string | null>(null);
 
   const patch = (update: Partial<PipelineState>) =>
     setState((current) => ({ ...current, ...update }));
@@ -35,6 +38,39 @@ export default function PipelineWorkspace() {
       pains: current.pains.map((pain, i) => (i === index ? update(pain) : pain)),
     }));
 
+  async function generate() {
+    setGenerating(true);
+    setGenerationError(null);
+    try {
+      const response = await fetch("/api/generate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          productName: state.productName,
+          idea: state.idea,
+          source: state.source,
+          context: state.context,
+        }),
+      });
+      const data: unknown = await response.json();
+      if (!response.ok) {
+        const message =
+          typeof data === "object" && data !== null && "error" in data
+            ? String((data as { error: unknown }).error)
+            : `Generation failed (HTTP ${response.status}).`;
+        throw new Error(message);
+      }
+      const result = parseGenerationResult(data);
+      setState((current) => applyGenerationResult(current, result));
+    } catch (error) {
+      setGenerationError(
+        error instanceof Error ? error.message : "Generation failed unexpectedly.",
+      );
+    } finally {
+      setGenerating(false);
+    }
+  }
+
   const markdown = buildValidationPackMarkdown(state);
 
   return (
@@ -47,6 +83,9 @@ export default function PipelineWorkspace() {
           context: state.context,
         }}
         onChange={patch}
+        onGenerate={generate}
+        generating={generating}
+        error={generationError}
       />
 
       <SegmentCandidates
@@ -70,9 +109,9 @@ export default function PipelineWorkspace() {
         }
       />
 
-      <FakePainCheck />
+      <FakePainCheck risks={state.fakePainRisks} evidence={state.requiredEvidence} />
 
-      <InterviewPlan />
+      <InterviewPlan dmTemplate={state.dmTemplate} questions={state.interviewQuestions} />
 
       <MvpSlice value={state.mvp} onChange={(update) => patch({ mvp: { ...state.mvp, ...update } })} />
 

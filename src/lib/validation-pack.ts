@@ -1,9 +1,5 @@
 import {
-  DM_TEMPLATE,
   EVIDENCE_RECORD_TEMPLATE,
-  FAKE_PAIN_RISKS,
-  INTERVIEW_QUESTIONS,
-  REQUIRED_EVIDENCE,
   SCORE_LABELS,
   SCORE_WEIGHTS,
   defaultPipelineState,
@@ -87,23 +83,23 @@ ${scoreRows}
 
 ## Fake-Pain Risks
 
-${FAKE_PAIN_RISKS.map((risk) => `- ${risk}`).join("\n")}
+${state.fakePainRisks.map((risk) => `- ${risk}`).join("\n")}
 
 ## Evidence Required
 
-${REQUIRED_EVIDENCE.map((item, index) => `${index + 1}. ${item}`).join("\n")}
+${state.requiredEvidence.map((item, index) => `${index + 1}. ${item}`).join("\n")}
 
 ## Interview Plan
 
 ### DM template
 
 \`\`\`text
-${DM_TEMPLATE}
+${state.dmTemplate}
 \`\`\`
 
 ### Interview questions
 
-${INTERVIEW_QUESTIONS.map((question, index) => `${index + 1}. ${question}`).join("\n")}
+${state.interviewQuestions.map((question, index) => `${index + 1}. ${question}`).join("\n")}
 
 ### Evidence record template
 

@@ -1,0 +1,50 @@
+id: SPOS-007
+title: Add AI-assisted pipeline generation
+autonomy_level: A2
+status: ready
+
+human_gate_evidence: >
+  Three real Ideenbox entries were processed through the static workflow.
+  Result: every section (segments, pain statements, DM template, MVP slice,
+  validation pack) required full manual rewriting — manual adaptation is the
+  validated bottleneck. This satisfies the roadmap Phase 3 gate.
+
+objective: >
+  Roadmap Phase 3: generate first-draft validation content from the raw idea
+  via the Claude API, behind explicit human gates — the user reviews, edits,
+  and confirms everything; nothing is auto-committed.
+
+allowed_files:
+  - src/app/**
+  - src/components/**
+  - src/lib/**
+  - package.json
+  - .env.example
+  - .gitignore
+
+blocked_files:
+  - .factory/policies/**
+  - .factory/validation/**
+  - .github/workflows/**
+  - scripts/factory/**
+
+requirements:
+  - POST /api/generate route handler calling the Claude API (claude-opus-4-8,
+    adaptive thinking, structured outputs) with prompt templates for segments,
+    pain scoring, interview plan, fake-pain risks, evidence, and MVP slice.
+  - Generated content fills the existing editable pipeline state; user
+    selection and editing remain the source of truth.
+  - Clear error states for missing API key, rate limits, and refusals.
+  - API key only via ANTHROPIC_API_KEY env var; never in the client bundle.
+
+validation:
+  - npm run typecheck
+  - npm run lint
+  - npm run test
+  - npm run build
+
+definition_of_done:
+  - Entering an idea and clicking generate fills all pipeline sections with
+    idea-specific content.
+  - All generated content remains editable; decision rule still applies.
+  - Without an API key the app still works as a manual/template workflow.
